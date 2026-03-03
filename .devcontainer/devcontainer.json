@@ -1,0 +1,52 @@
+// .devcontainer/devcontainer.json
+{
+    "name": "uv",
+    "build": {
+        "context": "..",
+        "dockerfile": "Dockerfile",
+        "args": {
+            "UV_VERSION": "latest"
+        }
+    },
+    "hostRequirements": {"gpu": "optional"}, // GPU becomes optional and auto detected
+    "features": {
+        "ghcr.io/devcontainers/features/github-cli:1": {}, // GitHub CLI for easy auth
+        "ghcr.io/schlich/devcontainer-features/starship:0": {}, // Starship prompt for a better terminal experience
+        "ghcr.io/devcontainers/features/aws-cli:1": {}, // AWS CLI for cloud interactions
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}, // Claude code AI integration
+        "ghcr.io/devcontainers/features/node:1": {} // Node.js and npm for JavaScript tooling
+    },
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "python.defaultInterpreterPath": "/home/vscode/.venv/bin/python"
+            },
+            "extensions": [
+                "astral-sh.ty", // Python type hinting and checking
+                "charliermarsh.ruff", // Fast Python linter and formatter
+                "ms-azuretools.vscode-docker", // Docker support
+                "ms-python.python", // Python support
+                "ms-toolsai.jupyter", // Jupyter Notebooks
+                "ms-python.vscode-pylance", // Python language server
+                "eamodio.gitlens", // Git supercharged 
+                "mhutchie.git-graph", // Visualize git history
+                "mechatroner.rainbow-csv", // CSV file support
+                "GitHub.vscode-github-actions", // GitHub Actions support
+                "GitHub.vscode-pull-request-github", // GitHub PR support
+                "tamasfe.even-better-toml", // TOML file support
+                "ryanluker.vscode-coverage-gutters", // Code coverage visualization
+                "oderwat.indent-rainbow" // Rainbow indentation for better code readability
+            ]
+        }
+    },
+    "containerEnv": {
+        "DISPLAY": "dummy",
+        "PYTHONUNBUFFERED": "True",
+        "UV_LINK_MODE": "copy",
+        "UV_PROJECT_ENVIRONMENT": "/home/vscode/.venv"
+    },
+    "updateRemoteUserUID": true,
+    "postCreateCommand": "sudo chown -R vscode:vscode /workspaces && bash -lc \"tr -d '\\r' < .devcontainer/setup_uv.sh | bash && tr -d '\\r' < .devcontainer/setup_codex.sh | bash\"", // Fix permissions then setup uv environment and codex
+    "postStartCommand": "bash -lc \"uv run pre-commit install && tr -d '\\r' < .devcontainer/setup_starship.sh | bash\"", // Install pre-commit hooks and setup starship prompt
+    "remoteUser": "vscode"
+}

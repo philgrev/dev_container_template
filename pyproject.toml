@@ -1,0 +1,28 @@
+[project]
+name = "as-uv-venv" 
+version = "0.1.1"
+description = "THIS IS A TEMPLATE - REPLACE THIS DESCRIPTION" # change this to your project description
+readme = "README.md"
+requires-python = ">=3.13"
+authors = [
+    { name = "Thomas Ostersen", email = "thomasostersen@datarock.com.au" }
+]
+dependencies = [
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.7",
+    "numpy>=2.3.4",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.3.0",
+    "ruff>=0.14.4",
+    "ty>=0.0.5",
+]
+
+[tool.uv] 
+package = false
+
+[tool.ty.src]
+include = ["src"] # enforce type checking for this folder
+exclude = ["codes", "tests"] # ignore type checking for these folders
