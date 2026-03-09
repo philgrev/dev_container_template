@@ -8,7 +8,7 @@
             "UV_VERSION": "latest"
         }
     },
-    "hostRequirements": {"gpu": "optional"}, // GPU becomes optional and auto detected
+    // "hostRequirements": {"gpu": "optional"}, // GPU becomes optional and auto detected
     "features": {
         "ghcr.io/devcontainers/features/github-cli:1": {}, // GitHub CLI for easy auth
         "ghcr.io/schlich/devcontainer-features/starship:0": {}, // Starship prompt for a better terminal experience
@@ -49,4 +49,5 @@
     "postCreateCommand": "sudo chown -R vscode:vscode /workspaces && bash -lc \"tr -d '\\r' < .devcontainer/setup_uv.sh | bash && tr -d '\\r' < .devcontainer/setup_codex.sh | bash\"", // Fix permissions then setup uv environment and codex
     "postStartCommand": "bash -lc \"uv run pre-commit install && tr -d '\\r' < .devcontainer/setup_starship.sh | bash\"", // Install pre-commit hooks and setup starship prompt
     "remoteUser": "vscode"
+
 }
