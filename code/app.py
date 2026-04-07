@@ -30,34 +30,37 @@ def _():
 
 @app.cell
 def _(mo):
-    import io
-    csv_upload = mo.ui.file(filetypes=[".csv"], label=".csv")
+    csv_path_input = mo.ui.text(
+        label="CSV file",
+        value="/workspaces/dev_container_template/data/Datarock_chip_joined_xyz.csv",
+        full_width=True,
+    )
     image_dir_input = mo.ui.text(
         label="Image directory",
-        value="/workspaces/dev_container_template/data/SU-671-W1",
+        value="/workspaces/dev_container_template/data/images",
         full_width=True,
     )
     mo.sidebar(
         mo.vstack([
-            csv_upload,
+            csv_path_input,
             image_dir_input,
         ])
     )
-    return csv_upload, image_dir_input, io
+    return csv_path_input, image_dir_input
 
 
 @app.cell
-def _(csv_upload, image_dir_input, io, mo, os, pd):
+def _(csv_path_input, image_dir_input, mo, os, pd):
     mo.stop(
-        not csv_upload.value,
-        mo.md("**Upload a CSV file above to get started.**"),
+        not csv_path_input.value or not os.path.isfile(csv_path_input.value),
+        mo.md(f"**CSV file not found:** `{csv_path_input.value}`"),
     )
     mo.stop(
         not image_dir_input.value or not os.path.isdir(image_dir_input.value),
         mo.md(f"**Directory not found:** `{image_dir_input.value}`"),
     )
 
-    df = pd.read_csv(io.BytesIO(csv_upload.value[0].contents))
+    df = pd.read_csv(csv_path_input.value)
     image_base_path = image_dir_input.value
     return df, image_base_path
 
@@ -75,115 +78,315 @@ def _(df, mo, pd):
         mo.md("**CSV must contain at least two numeric columns for the scatter plot.**"),
     )
 
-    _default_x = "umap_0" if "umap_0" in numeric_cols else numeric_cols[0]
-    _default_y = "umap_1" if "umap_1" in numeric_cols else numeric_cols[1]
+    _default_x = "V0" if "V0" in numeric_cols else numeric_cols[0]
+    _default_y = "V1" if "V1" in numeric_cols else numeric_cols[1]
 
     x_col_dropdown = mo.ui.dropdown(options=numeric_cols, value=_default_x, label="X axis")
     y_col_dropdown = mo.ui.dropdown(options=numeric_cols, value=_default_y, label="Y axis")
+    z_col_dropdown = mo.ui.dropdown(options=["None"] + numeric_cols, value="None", label="Z axis")
 
     color_options = [c for c in df.columns if c != "file_name"]
+    _default_color = "Alt1_Code" if "Alt1_Code" in color_options else "None"
     color_dropdown = mo.ui.dropdown(
         options=["None"] + color_options,
-        value="None",
+        value=_default_color,
         label="Colour by",
     )
-    return color_dropdown, x_col_dropdown, y_col_dropdown
+    filter_col_dropdown = mo.ui.dropdown(
+        options=["None"] + numeric_cols,
+        value="None",
+        label="Filter by",
+    )
+    _table_col_options = [c for c in df.columns if not c.startswith("feat_") and c != "file_name"]
+    _default_table_cols = [c for c in ["holeid", "Au_ppm", "cluster", "Lith1_Code", "Alt1_Code"] if c in _table_col_options]
+    table_cols_multiselect = mo.ui.multiselect(
+        options=_table_col_options,
+        value=_default_table_cols or _table_col_options,
+        label="Table columns",
+    )
+    import re as _re
+    _hex_pat = _re.compile(r'^#[0-9a-fA-F]{6}$')
+    hex_cols = [c for c in df.columns if df[c].dropna().astype(str).str.match(_hex_pat).all() and df[c].notna().any()]
+    hex_col_dropdown = mo.ui.dropdown(options=hex_cols, value=hex_cols[0] if hex_cols else None, label="Hex colour column")
+    use_hex_toggle = mo.ui.switch(label="Use actual hex colour", value=False)
+    return color_dropdown, filter_col_dropdown, hex_col_dropdown, hex_cols, table_cols_multiselect, use_hex_toggle, x_col_dropdown, y_col_dropdown, z_col_dropdown
 
 
 @app.cell
-def _(color_dropdown, mo, x_col_dropdown, y_col_dropdown):
-    mo.sidebar(
-        mo.vstack([
-            x_col_dropdown,
-            y_col_dropdown,
-            color_dropdown,
-        ])
-    )
+def _(color_dropdown, filter_col_dropdown, filter_max, filter_min, filter_slider, hex_col_dropdown, hex_cols, mo, table_cols_multiselect, use_hex_toggle, x_col_dropdown, y_col_dropdown, z_col_dropdown):
+    _sidebar_items = [
+        x_col_dropdown, y_col_dropdown, z_col_dropdown,
+        color_dropdown,
+    ]
+    if hex_cols:
+        _sidebar_items.append(use_hex_toggle)
+        _sidebar_items.append(hex_col_dropdown)
+    _sidebar_items.append(filter_col_dropdown)
+    if filter_slider is not None:
+        _sidebar_items.append(filter_slider)
+        _sidebar_items.append(mo.hstack([filter_min, filter_max], gap=1))
+    _sidebar_items.append(table_cols_multiselect)
+    mo.sidebar(mo.vstack(_sidebar_items))
     return
 
 
 @app.cell
-def _(mo):
-    get_highlight, set_highlight = mo.state(None)
-    get_selection, set_selection = mo.state([])
-    get_current_idx, set_current_idx = mo.state(None)
-    get_nav_pos, set_nav_pos = mo.state(0)
-    return get_current_idx, get_highlight, get_nav_pos, get_selection, set_current_idx, set_highlight, set_nav_pos, set_selection
+def _(df, filter_col_dropdown, mo):
+    if filter_col_dropdown.value != "None":
+        _col = df[filter_col_dropdown.value].dropna()
+        _min_v = float(_col.min())
+        _max_v = float(_col.max())
+        _step = max((_max_v - _min_v) / 200, 1e-6)
+        _step_r = round(_step, 6)
+        filter_slider = mo.ui.range_slider(
+            start=_min_v, stop=_max_v,
+            step=_step_r,
+            value=[_min_v, _max_v],
+            label=filter_col_dropdown.value,
+            full_width=True,
+        )
+        filter_min = mo.ui.number(
+            start=_min_v, stop=_max_v, step=_step_r,
+            value=_min_v, label="Min",
+        )
+        filter_max = mo.ui.number(
+            start=_min_v, stop=_max_v, step=_step_r,
+            value=_max_v, label="Max",
+        )
+    else:
+        filter_slider = None
+        filter_min = None
+        filter_max = None
+    return filter_max, filter_min, filter_slider
 
 
 @app.cell
-def _(color_dropdown, df, get_highlight, get_selection, go, mo, x_col_dropdown, y_col_dropdown):
+def _(mo):
+    get_selection, set_selection = mo.state([])
+    get_nav_pos, set_nav_pos = mo.state(0)  # tracks current page index
+    return get_nav_pos, get_selection, set_nav_pos, set_selection
+
+
+@app.cell
+def _(color_dropdown, df, filter_col_dropdown, filter_max, filter_min, filter_slider, go, hex_col_dropdown, mo, np, pd, use_hex_toggle, x_col_dropdown, y_col_dropdown, z_col_dropdown):
     _x_col = x_col_dropdown.value
     _y_col = y_col_dropdown.value
-    _x = df[_x_col].values
-    _y = df[_y_col].values
-
-    _sel = set(get_selection())
-    _has_sel = len(_sel) > 0
-    _opacities = [1.0 if i in _sel else 0.15 for i in range(len(_x))] if _has_sel else [0.5] * len(_x)
-    _sizes = [8 if i in _sel else 5 for i in range(len(_x))] if _has_sel else [5] * len(_x)
-
+    _z_col = z_col_dropdown.value
     _color_col = color_dropdown.value
     _fig = go.Figure()
 
-    if _color_col == "None":
-        _fig.add_trace(go.Scattergl(
-            x=_x, y=_y,
-            mode="markers",
-            marker=dict(size=_sizes, opacity=_opacities, color="steelblue"),
-            showlegend=False,
-        ))
-    else:
-        _values = df[_color_col]
-        if _values.dtype == "object" or _values.nunique() < 20:
-            for _cat in _values.unique():
-                _mask = (_values == _cat).values
-                _idx = [i for i, m in enumerate(_mask) if m]
-                _fig.add_trace(go.Scattergl(
-                    x=_x[_mask], y=_y[_mask],
-                    mode="markers",
-                    marker=dict(
-                        size=[_sizes[i] for i in _idx],
-                        opacity=[_opacities[i] for i in _idx],
-                    ),
-                    name=str(_cat),
+    # ── Filter mask ───────────────────────────────────────────────────────────
+    # Points excluded by the filter are simply not rendered; customdata on every
+    # plotted point stores its original df row index so lasso selections always
+    # map back to the right rows regardless of filtering or multi-trace colour.
+    _filter_mask = np.ones(len(df), dtype=bool)
+    if filter_col_dropdown.value != "None" and filter_slider is not None:
+        _fc = df[filter_col_dropdown.value].values.astype(float)
+        # Intersection of slider range and typed min/max — either control can
+        # restrict independently; both at defaults means no restriction.
+        _lo = max(filter_slider.value[0], filter_min.value)
+        _hi = min(filter_slider.value[1], filter_max.value)
+        _filter_mask = np.isfinite(_fc) & (_fc >= _lo) & (_fc <= _hi)
+
+    _orig_idx = np.where(_filter_mask)[0]   # plot position → original df row index
+    _x = df[_x_col].values[_filter_mask]
+    _y = df[_y_col].values[_filter_mask]
+
+    # ── Color pre-computation (from full dataset for a consistent scale) ──────
+    _is_cat = False
+    _cats = []
+    _color_vals = None      # full-length array; sliced with filter mask below
+    _cb = dict(title=_color_col)
+    _colorscale = "viridis"
+    _col = None
+    _col_filt = None        # filtered category column for per-trace masking
+
+    if _color_col != "None":
+        _col = df[_color_col]
+        _col_nn = _col.dropna()
+        _is_cat = _col.dtype.kind not in ('f', 'i', 'u') or _col.nunique() < 20
+
+        if _is_cat:
+            _cats = [
+                int(c) if isinstance(c, float) and c.is_integer() else c
+                for c in sorted(_col_nn.unique())
+            ]
+            _col_filt = _col.values[_filter_mask]
+            _nan_m = pd.isna(_col_filt)
+        else:
+            _raw = _col.values.astype(float)
+            _nonneg = bool((_col_nn >= 0).all())
+            _max_v = float(_col_nn.max())
+            _p90 = float(_col_nn.quantile(0.9))
+            if _nonneg and _p90 > 0 and _max_v / _p90 > 10:
+                _color_vals = np.where(
+                    np.isnan(_raw), np.nan, np.log1p(np.maximum(_raw, 0))
+                )
+                _pos = _col_nn[_col_nn > 0]
+                _min_p = float(_pos.min()) if len(_pos) else 1.0
+                _tick_orig = sorted(set(
+                    float(f"{t:.3g}")
+                    for t in [0.0] + list(np.geomspace(_min_p, _max_v, 5))
                 ))
+                _cb = dict(
+                    title=f"{_color_col} (log scale)",
+                    tickvals=list(np.log1p(_tick_orig)),
+                    ticktext=[str(t) for t in _tick_orig],
+                )
+            else:
+                _color_vals = _raw
+            _cv_filt = _color_vals[_filter_mask]
+            _nan_m = np.isnan(_cv_filt)
+
+    # ── Hex colour override ───────────────────────────────────────────────────
+    # When enabled, all points are drawn in a single trace using the per-row hex
+    # colour values directly, bypassing the legend colour scheme entirely.
+    _use_hex = use_hex_toggle.value and hex_col_dropdown.value is not None
+    if _use_hex:
+        _hex_vals = df[hex_col_dropdown.value].values[_filter_mask]
+        # Fall back to grey for any missing hex values
+        _hex_vals = np.where(pd.isna(_hex_vals), "#bbbbbb", _hex_vals)
+
+    # ── 2D / 3D branch ───────────────────────────────────────────────────────
+    # idx_map[i] = 1-D array of original df row indices for trace i.
+    # Used downstream to map (curveNumber, pointIndex) → df row without
+    # relying on customdata, which Marimo may strip when re-extracting points.
+    _sel_m = dict(opacity=1.0, size=10)
+    _unsel_m = dict(opacity=0.15, size=5)
+    idx_map = []
+
+    if _z_col != "None":
+        # 3D — lasso selection not available in Plotly 3D.
+        _z = df[_z_col].values[_filter_mask]
+        if _use_hex:
+            _fig.add_trace(go.Scatter3d(
+                x=_x, y=_y, z=_z, mode="markers",
+                marker=dict(size=3, opacity=0.7, color=list(_hex_vals)),
+                customdata=_orig_idx, showlegend=False,
+            ))
+            idx_map.append(_orig_idx)
+        elif _color_col == "None":
+            _fig.add_trace(go.Scatter3d(
+                x=_x, y=_y, z=_z, mode="markers",
+                marker=dict(size=3, opacity=0.7, color="steelblue"),
+                customdata=_orig_idx, showlegend=False,
+            ))
+            idx_map.append(_orig_idx)
+        elif _is_cat:
+            for _cat in _cats:
+                _m = _col_filt == _cat
+                if not _m.any():
+                    continue
+                _fig.add_trace(go.Scatter3d(
+                    x=_x[_m], y=_y[_m], z=_z[_m], mode="markers",
+                    marker=dict(size=3, opacity=0.7),
+                    customdata=_orig_idx[_m], name=str(_cat),
+                ))
+                idx_map.append(_orig_idx[_m])
+            if _nan_m.any():
+                _fig.add_trace(go.Scatter3d(
+                    x=_x[_nan_m], y=_y[_nan_m], z=_z[_nan_m], mode="markers",
+                    marker=dict(size=3, opacity=0.5, color="#bbbbbb"),
+                    customdata=_orig_idx[_nan_m], name="NaN",
+                ))
+                idx_map.append(_orig_idx[_nan_m])
+        else:
+            _fig.add_trace(go.Scatter3d(
+                x=_x[~_nan_m], y=_y[~_nan_m], z=_z[~_nan_m], mode="markers",
+                marker=dict(size=3, opacity=0.7, color=_cv_filt[~_nan_m],
+                            colorscale=_colorscale, colorbar=_cb),
+                customdata=_orig_idx[~_nan_m], showlegend=False,
+            ))
+            idx_map.append(_orig_idx[~_nan_m])
+            if _nan_m.any():
+                _fig.add_trace(go.Scatter3d(
+                    x=_x[_nan_m], y=_y[_nan_m], z=_z[_nan_m], mode="markers",
+                    marker=dict(size=3, opacity=0.5, color="#bbbbbb"),
+                    customdata=_orig_idx[_nan_m], name="NaN",
+                ))
+                idx_map.append(_orig_idx[_nan_m])
+        _fig.update_layout(
+            scene=dict(xaxis_title=_x_col, yaxis_title=_y_col, zaxis_title=_z_col),
+            uirevision=f"{_x_col}|{_y_col}|{_z_col}|{_color_col}|{_use_hex}",
+            height=600, margin=dict(l=0, r=0, t=20, b=0),
+        )
+    else:
+        # 2D — client-side selected/unselected styling keeps the plot stable
+        # across navigation; the plot only re-renders for data/column changes.
+        if _use_hex:
+            _fig.add_trace(go.Scattergl(
+                x=_x, y=_y, mode="markers",
+                marker=dict(size=6, opacity=0.7, color=list(_hex_vals)),
+                selected=dict(marker=_sel_m), unselected=dict(marker=_unsel_m),
+                customdata=_orig_idx, showlegend=False,
+            ))
+            idx_map.append(_orig_idx)
+        elif _color_col == "None":
+            _fig.add_trace(go.Scattergl(
+                x=_x, y=_y, mode="markers",
+                marker=dict(size=6, opacity=0.7, color="steelblue"),
+                selected=dict(marker=_sel_m), unselected=dict(marker=_unsel_m),
+                customdata=_orig_idx, showlegend=False,
+            ))
+            idx_map.append(_orig_idx)
+        elif _is_cat:
+            for _cat in _cats:
+                _m = _col_filt == _cat
+                if not _m.any():
+                    continue
+                _fig.add_trace(go.Scattergl(
+                    x=_x[_m], y=_y[_m], mode="markers",
+                    marker=dict(size=6, opacity=0.7),
+                    selected=dict(marker=_sel_m), unselected=dict(marker=_unsel_m),
+                    customdata=_orig_idx[_m], name=str(_cat),
+                ))
+                idx_map.append(_orig_idx[_m])
+            if _nan_m.any():
+                _fig.add_trace(go.Scattergl(
+                    x=_x[_nan_m], y=_y[_nan_m], mode="markers",
+                    marker=dict(size=6, opacity=0.5, color="#bbbbbb"),
+                    selected=dict(marker=dict(opacity=1.0, size=10, color="#bbbbbb")),
+                    unselected=dict(marker=dict(opacity=0.15, size=5, color="#bbbbbb")),
+                    customdata=_orig_idx[_nan_m], name="NaN",
+                ))
+                idx_map.append(_orig_idx[_nan_m])
         else:
             _fig.add_trace(go.Scattergl(
-                x=_x, y=_y,
-                mode="markers",
-                marker=dict(
-                    size=_sizes, opacity=_opacities,
-                    color=_values, colorscale="viridis", colorbar=dict(title=_color_col),
-                ),
-                showlegend=False,
+                x=_x[~_nan_m], y=_y[~_nan_m], mode="markers",
+                marker=dict(size=6, opacity=0.7, color=_cv_filt[~_nan_m],
+                            colorscale=_colorscale, colorbar=_cb),
+                selected=dict(marker=_sel_m), unselected=dict(marker=_unsel_m),
+                customdata=_orig_idx[~_nan_m], showlegend=False,
             ))
-
-    _fig.update_layout(
-        dragmode="lasso",
-        xaxis_title=_x_col,
-        yaxis_title=_y_col,
-        height=600,
-        margin=dict(l=40, r=20, t=20, b=40),
-    )
-
-    # Add highlight point if set
-    _hl = get_highlight()
-    if _hl is not None:
-        _fig.add_trace(go.Scatter(
-            x=[_hl[0]], y=[_hl[1]],
-            mode="markers",
-            marker=dict(size=18, color="rgba(0,0,0,0)", line=dict(color="red", width=3)),
-            showlegend=False,
-            hoverinfo="skip",
-        ))
+            idx_map.append(_orig_idx[~_nan_m])
+            if _nan_m.any():
+                _fig.add_trace(go.Scattergl(
+                    x=_x[_nan_m], y=_y[_nan_m], mode="markers",
+                    marker=dict(size=6, opacity=0.5, color="#bbbbbb"),
+                    selected=dict(marker=dict(opacity=1.0, size=10, color="#bbbbbb")),
+                    unselected=dict(marker=dict(opacity=0.15, size=5, color="#bbbbbb")),
+                    customdata=_orig_idx[_nan_m], name="NaN",
+                ))
+                idx_map.append(_orig_idx[_nan_m])
+        # Axis ranges from the full dataset so they don't shift as filter moves.
+        _x_full = df[_x_col].values
+        _y_full = df[_y_col].values
+        _x_pad = (_x_full.max() - _x_full.min()) * 0.05 or 1.0
+        _y_pad = (_y_full.max() - _y_full.min()) * 0.05 or 1.0
+        _fig.update_layout(
+            dragmode="lasso",
+            xaxis=dict(title=_x_col, range=[_x_full.min() - _x_pad, _x_full.max() + _x_pad], autorange=False),
+            yaxis=dict(title=_y_col, range=[_y_full.min() - _y_pad, _y_full.max() + _y_pad], autorange=False),
+            uirevision=f"{_x_col}|{_y_col}|{_color_col}|{_use_hex}",
+            height=600, margin=dict(l=40, r=20, t=20, b=40),
+        )
 
     plot = mo.ui.plotly(_fig)
-    return (plot,)
+    return idx_map, plot
 
 
 @app.cell
-def _(df, np, pd, plot, set_nav_pos, set_selection, x_col_dropdown, y_col_dropdown):
+def _(df, idx_map, np, pd, plot, set_nav_pos, set_selection, x_col_dropdown, y_col_dropdown):
     indices = np.arange(len(df))
 
     df_plot = pd.DataFrame(
@@ -195,27 +398,45 @@ def _(df, np, pd, plot, set_nav_pos, set_selection, x_col_dropdown, y_col_dropdo
         }
     )
 
-    # Only update selection state when the user actually selects new points
-    _new_selection = plot.indices
-    if len(_new_selection):
-        set_selection(list(_new_selection))
+    # Use idx_map[curveNumber][pointIndex] to resolve original df row indices.
+    # This is robust: Marimo strips customdata when re-extracting points from
+    # a range selection, but curveNumber/pointIndex are always present.
+    if len(plot.indices):
+        _use_indices = list(plot.indices)  # last-resort fallback (trace-local, wrong after filter)
+        _points = plot.value              # list[dict] from Marimo
+        if isinstance(_points, list) and _points:
+            try:
+                _from_map = []
+                for _p in _points:
+                    _curve = _p.get("curveNumber", 0)
+                    _pt    = _p.get("pointIndex")
+                    if _pt is not None and isinstance(_curve, int) and 0 <= _curve < len(idx_map):
+                        _arr = idx_map[_curve]
+                        if 0 <= _pt < len(_arr):
+                            _from_map.append(int(_arr[_pt]))
+                if _from_map:
+                    _use_indices = _from_map
+            except (KeyError, TypeError, ValueError, IndexError):
+                pass
+        set_selection(_use_indices)
         set_nav_pos(0)
     return (df_plot,)
 
 
 @app.cell
-def _(get_nav_pos, get_selection, mo, set_highlight, set_nav_pos, set_selection):
+def _(get_nav_pos, get_selection, mo, set_nav_pos, set_selection):
+    _IMAGES_PER_PAGE = 9
     selected_indices = get_selection()
     if len(selected_indices):
+        _total_pages = (len(selected_indices) - 1) // _IMAGES_PER_PAGE + 1
         def _go_prev(v):
-            set_nav_pos((get_nav_pos() - 1) % len(selected_indices))
+            set_nav_pos((get_nav_pos() - 1) % _total_pages)
             return v + 1
         def _go_next(v):
-            set_nav_pos((get_nav_pos() + 1) % len(selected_indices))
+            set_nav_pos((get_nav_pos() + 1) % _total_pages)
             return v + 1
         def _clear(v):
             set_selection([])
-            set_highlight(None)
             set_nav_pos(0)
             return v + 1
         prev_btn = mo.ui.button(label="◀ Prev", value=0, on_click=_go_prev)
@@ -228,26 +449,29 @@ def _(get_nav_pos, get_selection, mo, set_highlight, set_nav_pos, set_selection)
 
 
 @app.cell
-def _(Image, df_plot, get_current_idx, get_highlight, get_nav_pos, get_selection, image_base_path, mo, os, selected_indices, set_current_idx, set_highlight):
+def _(Image, df_plot, get_nav_pos, get_selection, image_base_path, mo, os, selected_indices):
+    _IMAGES_PER_PAGE = 9
+
     if not get_selection():
-        if get_highlight() is not None:
-            set_highlight(None)
         image_output = mo.md("**Select points on the scatter plot to browse images.**")
     elif len(selected_indices):
-        _idx = get_nav_pos() % len(selected_indices)
-        _current_idx = selected_indices[_idx]
-        _current_row = df_plot.iloc[_current_idx]
-        img = Image.open(os.path.join(image_base_path, _current_row["file_name"]))
+        _total_pages = (len(selected_indices) - 1) // _IMAGES_PER_PAGE + 1
+        _page = get_nav_pos() % _total_pages
+        _page_start = _page * _IMAGES_PER_PAGE
+        _page_end = min(_page_start + _IMAGES_PER_PAGE, len(selected_indices))
+        _page_indices = selected_indices[_page_start:_page_end]
 
-        _new_hl = (float(_current_row["x"]), float(_current_row["y"]))
-        if get_highlight() != _new_hl:
-            set_highlight(_new_hl)
-        if get_current_idx() != _current_idx:
-            set_current_idx(_current_idx)
+        _image_cells = []
+        for _pi in _page_indices:
+            _row = df_plot.iloc[_pi]
+            _img = Image.open(os.path.join(image_base_path, _row["file_name"]))
+            _image_cells.append(
+                mo.vstack([mo.image(_img, width=160), mo.md(f"`{_row['file_name']}`")], align="center")
+            )
 
         image_output = mo.vstack([
-            mo.md(f"**Image {_idx + 1} of {len(selected_indices)}** — `{_current_row['file_name']}`"),
-            mo.image(img),
+            mo.md(f"**Images {_page_start + 1}–{_page_end} of {len(selected_indices)}** (page {_page + 1} of {_total_pages})"),
+            mo.hstack(_image_cells, gap=1),
         ])
     else:
         image_output = mo.md("**Select points on the scatter plot to browse images.**")
@@ -255,35 +479,38 @@ def _(Image, df_plot, get_current_idx, get_highlight, get_nav_pos, get_selection
 
 
 @app.cell
-def _(df, get_current_idx, get_selection, mo, pd):
+def _(df, get_nav_pos, get_selection, mo, pd, table_cols_multiselect):
+    _IMAGES_PER_PAGE = 9
     _sel = get_selection()
     if len(_sel):
-        _feat_cols = [c for c in df.columns if c.startswith("feat_")]
-        _all_selected = df.iloc[_sel].drop(columns=_feat_cols).reset_index(drop=True)
-        _current = get_current_idx()
-        _current_pos = _sel.index(_current) if _current in _sel else None
+        _show_cols = table_cols_multiselect.value or [c for c in df.columns if not c.startswith("feat_") and c != "file_name"]
+        _all_selected = df.iloc[_sel][_show_cols].reset_index(drop=True)
+        _page_start = get_nav_pos() * _IMAGES_PER_PAGE
+        _page_end = _page_start + _IMAGES_PER_PAGE
 
         def _highlight(row: str, col: str, value):
             try:
-                if _current_pos is not None and int(row) == _current_pos:
+                if _page_start <= int(row) < _page_end:
                     return {"background-color": "#fff3cd"}
             except (ValueError, TypeError):
                 pass
             return {}
 
         data_table = mo.ui.table(
-            _all_selected, style_cell=_highlight, selection="single", page_size=15,
+            _all_selected, style_cell=_highlight, selection="single",
+            pagination=False,
         )
     else:
-        data_table = mo.ui.table(pd.DataFrame(), selection="single", page_size=15)
+        data_table = mo.ui.table(pd.DataFrame(), selection="single", pagination=False)
     return (data_table,)
 
 
 @app.cell
 def _(data_table, set_nav_pos):
+    _IMAGES_PER_PAGE = 9
     _selected = data_table.value
     if len(_selected):
-        set_nav_pos(int(_selected.index[0]))
+        set_nav_pos(int(_selected.index[0]) // _IMAGES_PER_PAGE)
     return
 
 
