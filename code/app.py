@@ -32,12 +32,12 @@ def _():
 def _(mo):
     csv_path_input = mo.ui.text(
         label="CSV file",
-        value="/workspaces/dev_container_template/data/Datarock_chip_joined_xyz.csv",
+        value="/workspaces/dev_container_template/data/boss_chip_features_a.csv",
         full_width=True,
     )
     image_dir_input = mo.ui.text(
         label="Image directory",
-        value="/workspaces/dev_container_template/data/images",
+        value="/workspaces/dev_container_template/data/images_boss_a",
         full_width=True,
     )
     mo.sidebar(
@@ -68,8 +68,8 @@ def _(csv_path_input, image_dir_input, mo, os, pd):
 @app.cell
 def _(df, mo, pd):
     mo.stop(
-        "file_name" not in df.columns,
-        mo.md("**CSV must contain a `file_name` column.**"),
+        "image_name" not in df.columns,
+        mo.md("**CSV must contain a `image_name` column.**"),
     )
 
     numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
@@ -78,14 +78,14 @@ def _(df, mo, pd):
         mo.md("**CSV must contain at least two numeric columns for the scatter plot.**"),
     )
 
-    _default_x = "V0" if "V0" in numeric_cols else numeric_cols[0]
-    _default_y = "V1" if "V1" in numeric_cols else numeric_cols[1]
+    _default_x = "umap_0" if "umap_0" in numeric_cols else numeric_cols[0]
+    _default_y = "umap_1" if "umap_1" in numeric_cols else numeric_cols[1]
 
     x_col_dropdown = mo.ui.dropdown(options=numeric_cols, value=_default_x, label="X axis")
     y_col_dropdown = mo.ui.dropdown(options=numeric_cols, value=_default_y, label="Y axis")
     z_col_dropdown = mo.ui.dropdown(options=["None"] + numeric_cols, value="None", label="Z axis")
 
-    color_options = [c for c in df.columns if c != "file_name"]
+    color_options = [c for c in df.columns if c != "image_name"]
     _default_color = "Alt1_Code" if "Alt1_Code" in color_options else "None"
     color_dropdown = mo.ui.dropdown(
         options=["None"] + color_options,
@@ -97,7 +97,7 @@ def _(df, mo, pd):
         value="None",
         label="Filter by",
     )
-    _table_col_options = [c for c in df.columns if not c.startswith("feat_") and c != "file_name"]
+    _table_col_options = [c for c in df.columns if not c.startswith("feat_") and c != "image_name"]
     _default_table_cols = [c for c in ["holeid", "Au_ppm", "cluster", "Lith1_Code", "Alt1_Code"] if c in _table_col_options]
     table_cols_multiselect = mo.ui.multiselect(
         options=_table_col_options,
@@ -131,7 +131,7 @@ def _(color_dropdown, filter_col_dropdown, filter_max, filter_min, filter_slider
 
 
 @app.cell
-def _(df, filter_col_dropdown, mo):
+def _(df, filter_col_dropdown, mo, pd):
     if filter_col_dropdown.value != "None":
         _col = df[filter_col_dropdown.value].dropna()
         _min_v = float(_col.min())
@@ -397,7 +397,7 @@ def _(df, idx_map, np, pd, plot, set_nav_pos, set_selection, x_col_dropdown, y_c
             "index": indices,
             "x": df[x_col_dropdown.value].values,
             "y": df[y_col_dropdown.value].values,
-            "file_name": df["file_name"],
+            "image_name": df["image_name"],
         }
     )
 
@@ -467,9 +467,9 @@ def _(Image, df_plot, get_nav_pos, get_selection, image_base_path, mo, os, selec
         _image_cells = []
         for _pi in _page_indices:
             _row = df_plot.iloc[_pi]
-            _img = Image.open(os.path.join(image_base_path, _row["file_name"]))
+            _img = Image.open(os.path.join(image_base_path, _row["image_name"]))
             _image_cells.append(
-                mo.vstack([mo.image(_img, width=160), mo.md(f"`{_row['file_name']}`")], align="center")
+                mo.vstack([mo.image(_img, width=160), mo.md(f"`{_row['image_name']}`")], align="center")
             )
 
         image_output = mo.vstack([
@@ -486,7 +486,7 @@ def _(df, get_nav_pos, get_selection, mo, pd, table_cols_multiselect):
     _IMAGES_PER_PAGE = 8
     _sel = get_selection()
     if len(_sel):
-        _show_cols = table_cols_multiselect.value or [c for c in df.columns if not c.startswith("feat_") and c != "file_name"]
+        _show_cols = table_cols_multiselect.value or [c for c in df.columns if not c.startswith("feat_") and c != "image_name"]
         _all_selected = df.iloc[_sel][_show_cols].reset_index(drop=True)
         _page_start = get_nav_pos() * _IMAGES_PER_PAGE
         _page_end = _page_start + _IMAGES_PER_PAGE
