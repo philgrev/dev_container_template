@@ -136,8 +136,8 @@ def _(df, filter_col_dropdown, mo):
         _col = df[filter_col_dropdown.value].dropna()
         _min_v = float(_col.min())
         _max_v = float(_col.max())
-        _step = max((_max_v - _min_v) / 200, 1e-6)
-        _step_r = round(_step, 6)
+        _is_int_col = pd.api.types.is_integer_dtype(_col) or bool((_col == _col.round()).all())
+        _step_r = 1 if _is_int_col else max(round((_max_v - _min_v) / 1000, 6), 1e-6)
         filter_slider = mo.ui.range_slider(
             start=_min_v, stop=_max_v,
             step=_step_r,
@@ -258,17 +258,11 @@ def _(color_dropdown, df, filter_col_dropdown, filter_max, filter_min, filter_sl
     if _z_col != "None":
         # 3D — lasso selection not available in Plotly 3D.
         _z = df[_z_col].values[_filter_mask]
-        if _use_hex:
+        if _color_col == "None":
+            _c = list(_hex_vals) if _use_hex else "steelblue"
             _fig.add_trace(go.Scatter3d(
                 x=_x, y=_y, z=_z, mode="markers",
-                marker=dict(size=3, opacity=0.7, color=list(_hex_vals)),
-                customdata=_orig_idx, showlegend=False,
-            ))
-            idx_map.append(_orig_idx)
-        elif _color_col == "None":
-            _fig.add_trace(go.Scatter3d(
-                x=_x, y=_y, z=_z, mode="markers",
-                marker=dict(size=3, opacity=0.7, color="steelblue"),
+                marker=dict(size=3, opacity=0.7, color=_c),
                 customdata=_orig_idx, showlegend=False,
             ))
             idx_map.append(_orig_idx)
@@ -277,54 +271,53 @@ def _(color_dropdown, df, filter_col_dropdown, filter_max, filter_min, filter_sl
                 _m = _col_filt == _cat
                 if not _m.any():
                     continue
+                _mk = dict(size=3, opacity=0.7)
+                if _use_hex:
+                    _mk["color"] = list(_hex_vals[_m])
                 _fig.add_trace(go.Scatter3d(
                     x=_x[_m], y=_y[_m], z=_z[_m], mode="markers",
-                    marker=dict(size=3, opacity=0.7),
-                    customdata=_orig_idx[_m], name=str(_cat),
+                    marker=_mk, customdata=_orig_idx[_m], name=str(_cat),
                 ))
                 idx_map.append(_orig_idx[_m])
             if _nan_m.any():
+                _nan_c = list(_hex_vals[_nan_m]) if _use_hex else "#bbbbbb"
                 _fig.add_trace(go.Scatter3d(
                     x=_x[_nan_m], y=_y[_nan_m], z=_z[_nan_m], mode="markers",
-                    marker=dict(size=3, opacity=0.5, color="#bbbbbb"),
+                    marker=dict(size=3, opacity=0.5, color=_nan_c),
                     customdata=_orig_idx[_nan_m], name="NaN",
                 ))
                 idx_map.append(_orig_idx[_nan_m])
         else:
+            _main_mk = dict(size=3, opacity=0.7,
+                            color=list(_hex_vals[~_nan_m]) if _use_hex else _cv_filt[~_nan_m])
+            if not _use_hex:
+                _main_mk.update(colorscale=_colorscale, colorbar=_cb)
             _fig.add_trace(go.Scatter3d(
                 x=_x[~_nan_m], y=_y[~_nan_m], z=_z[~_nan_m], mode="markers",
-                marker=dict(size=3, opacity=0.7, color=_cv_filt[~_nan_m],
-                            colorscale=_colorscale, colorbar=_cb),
-                customdata=_orig_idx[~_nan_m], showlegend=False,
+                marker=_main_mk, customdata=_orig_idx[~_nan_m], showlegend=False,
             ))
             idx_map.append(_orig_idx[~_nan_m])
             if _nan_m.any():
+                _nan_c = list(_hex_vals[_nan_m]) if _use_hex else "#bbbbbb"
                 _fig.add_trace(go.Scatter3d(
                     x=_x[_nan_m], y=_y[_nan_m], z=_z[_nan_m], mode="markers",
-                    marker=dict(size=3, opacity=0.5, color="#bbbbbb"),
+                    marker=dict(size=3, opacity=0.5, color=_nan_c),
                     customdata=_orig_idx[_nan_m], name="NaN",
                 ))
                 idx_map.append(_orig_idx[_nan_m])
         _fig.update_layout(
             scene=dict(xaxis_title=_x_col, yaxis_title=_y_col, zaxis_title=_z_col),
-            uirevision=f"{_x_col}|{_y_col}|{_z_col}|{_color_col}|{_use_hex}",
+            uirevision=f"{_x_col}|{_y_col}|{_z_col}|{_color_col}",
             height=600, margin=dict(l=0, r=0, t=20, b=0),
         )
     else:
-        # 2D — client-side selected/unselected styling keeps the plot stable
-        # across navigation; the plot only re-renders for data/column changes.
-        if _use_hex:
+        # 2D — same trace structure whether hex mode is on or off so that
+        # uirevision stays constant and Plotly legend state is preserved.
+        if _color_col == "None":
+            _c = list(_hex_vals) if _use_hex else "steelblue"
             _fig.add_trace(go.Scattergl(
                 x=_x, y=_y, mode="markers",
-                marker=dict(size=6, opacity=0.7, color=list(_hex_vals)),
-                selected=dict(marker=_sel_m), unselected=dict(marker=_unsel_m),
-                customdata=_orig_idx, showlegend=False,
-            ))
-            idx_map.append(_orig_idx)
-        elif _color_col == "None":
-            _fig.add_trace(go.Scattergl(
-                x=_x, y=_y, mode="markers",
-                marker=dict(size=6, opacity=0.7, color="steelblue"),
+                marker=dict(size=6, opacity=0.7, color=_c),
                 selected=dict(marker=_sel_m), unselected=dict(marker=_unsel_m),
                 customdata=_orig_idx, showlegend=False,
             ))
@@ -334,37 +327,47 @@ def _(color_dropdown, df, filter_col_dropdown, filter_max, filter_min, filter_sl
                 _m = _col_filt == _cat
                 if not _m.any():
                     continue
+                _mk = dict(size=6, opacity=0.7)
+                if _use_hex:
+                    _mk["color"] = list(_hex_vals[_m])
                 _fig.add_trace(go.Scattergl(
                     x=_x[_m], y=_y[_m], mode="markers",
-                    marker=dict(size=6, opacity=0.7),
+                    marker=_mk,
                     selected=dict(marker=_sel_m), unselected=dict(marker=_unsel_m),
                     customdata=_orig_idx[_m], name=str(_cat),
                 ))
                 idx_map.append(_orig_idx[_m])
             if _nan_m.any():
+                _nan_c = list(_hex_vals[_nan_m]) if _use_hex else "#bbbbbb"
+                _nan_sel = dict(marker=_sel_m) if _use_hex else dict(marker=dict(opacity=1.0, size=10, color="#bbbbbb"))
+                _nan_unsel = dict(marker=_unsel_m) if _use_hex else dict(marker=dict(opacity=0.15, size=5, color="#bbbbbb"))
                 _fig.add_trace(go.Scattergl(
                     x=_x[_nan_m], y=_y[_nan_m], mode="markers",
-                    marker=dict(size=6, opacity=0.5, color="#bbbbbb"),
-                    selected=dict(marker=dict(opacity=1.0, size=10, color="#bbbbbb")),
-                    unselected=dict(marker=dict(opacity=0.15, size=5, color="#bbbbbb")),
+                    marker=dict(size=6, opacity=0.5, color=_nan_c),
+                    selected=_nan_sel, unselected=_nan_unsel,
                     customdata=_orig_idx[_nan_m], name="NaN",
                 ))
                 idx_map.append(_orig_idx[_nan_m])
         else:
+            _main_mk = dict(size=6, opacity=0.7,
+                            color=list(_hex_vals[~_nan_m]) if _use_hex else _cv_filt[~_nan_m])
+            if not _use_hex:
+                _main_mk.update(colorscale=_colorscale, colorbar=_cb)
             _fig.add_trace(go.Scattergl(
                 x=_x[~_nan_m], y=_y[~_nan_m], mode="markers",
-                marker=dict(size=6, opacity=0.7, color=_cv_filt[~_nan_m],
-                            colorscale=_colorscale, colorbar=_cb),
+                marker=_main_mk,
                 selected=dict(marker=_sel_m), unselected=dict(marker=_unsel_m),
                 customdata=_orig_idx[~_nan_m], showlegend=False,
             ))
             idx_map.append(_orig_idx[~_nan_m])
             if _nan_m.any():
+                _nan_c = list(_hex_vals[_nan_m]) if _use_hex else "#bbbbbb"
+                _nan_sel = dict(marker=_sel_m) if _use_hex else dict(marker=dict(opacity=1.0, size=10, color="#bbbbbb"))
+                _nan_unsel = dict(marker=_unsel_m) if _use_hex else dict(marker=dict(opacity=0.15, size=5, color="#bbbbbb"))
                 _fig.add_trace(go.Scattergl(
                     x=_x[_nan_m], y=_y[_nan_m], mode="markers",
-                    marker=dict(size=6, opacity=0.5, color="#bbbbbb"),
-                    selected=dict(marker=dict(opacity=1.0, size=10, color="#bbbbbb")),
-                    unselected=dict(marker=dict(opacity=0.15, size=5, color="#bbbbbb")),
+                    marker=dict(size=6, opacity=0.5, color=_nan_c),
+                    selected=_nan_sel, unselected=_nan_unsel,
                     customdata=_orig_idx[_nan_m], name="NaN",
                 ))
                 idx_map.append(_orig_idx[_nan_m])
@@ -377,7 +380,7 @@ def _(color_dropdown, df, filter_col_dropdown, filter_max, filter_min, filter_sl
             dragmode="lasso",
             xaxis=dict(title=_x_col, range=[_x_full.min() - _x_pad, _x_full.max() + _x_pad], autorange=False),
             yaxis=dict(title=_y_col, range=[_y_full.min() - _y_pad, _y_full.max() + _y_pad], autorange=False),
-            uirevision=f"{_x_col}|{_y_col}|{_color_col}|{_use_hex}",
+            uirevision=f"{_x_col}|{_y_col}|{_color_col}",
             height=600, margin=dict(l=40, r=20, t=20, b=40),
         )
 
@@ -425,7 +428,7 @@ def _(df, idx_map, np, pd, plot, set_nav_pos, set_selection, x_col_dropdown, y_c
 
 @app.cell
 def _(get_nav_pos, get_selection, mo, set_nav_pos, set_selection):
-    _IMAGES_PER_PAGE = 9
+    _IMAGES_PER_PAGE = 8
     selected_indices = get_selection()
     if len(selected_indices):
         _total_pages = (len(selected_indices) - 1) // _IMAGES_PER_PAGE + 1
@@ -450,7 +453,7 @@ def _(get_nav_pos, get_selection, mo, set_nav_pos, set_selection):
 
 @app.cell
 def _(Image, df_plot, get_nav_pos, get_selection, image_base_path, mo, os, selected_indices):
-    _IMAGES_PER_PAGE = 9
+    _IMAGES_PER_PAGE = 8
 
     if not get_selection():
         image_output = mo.md("**Select points on the scatter plot to browse images.**")
@@ -480,7 +483,7 @@ def _(Image, df_plot, get_nav_pos, get_selection, image_base_path, mo, os, selec
 
 @app.cell
 def _(df, get_nav_pos, get_selection, mo, pd, table_cols_multiselect):
-    _IMAGES_PER_PAGE = 9
+    _IMAGES_PER_PAGE = 8
     _sel = get_selection()
     if len(_sel):
         _show_cols = table_cols_multiselect.value or [c for c in df.columns if not c.startswith("feat_") and c != "file_name"]
@@ -507,7 +510,7 @@ def _(df, get_nav_pos, get_selection, mo, pd, table_cols_multiselect):
 
 @app.cell
 def _(data_table, set_nav_pos):
-    _IMAGES_PER_PAGE = 9
+    _IMAGES_PER_PAGE = 8
     _selected = data_table.value
     if len(_selected):
         set_nav_pos(int(_selected.index[0]) // _IMAGES_PER_PAGE)
