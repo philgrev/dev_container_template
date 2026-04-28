@@ -32,12 +32,12 @@ def _():
 def _(mo):
     csv_path_input = mo.ui.text(
         label="CSV file",
-        value="/workspaces/dev_container_template/data/boss_chip_features_a.csv",
+        value="/workspaces/dev_container_template/data/boss_chip_features_clusters_chip_bmr_merged.csv",
         full_width=True,
     )
     image_dir_input = mo.ui.text(
         label="Image directory",
-        value="/workspaces/dev_container_template/data/images_boss_a",
+        value="/workspaces/dev_container_template/data/images_boss",
         full_width=True,
     )
     mo.sidebar(
